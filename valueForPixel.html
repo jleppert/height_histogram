@@ -1,0 +1,222 @@
+<html>
+  <head>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+      }
+      canvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        cursor: crosshair;
+        z-index: 8;
+      }
+
+      .histogram {
+        position: fixed;
+      }
+
+      .scrubber {
+        position: fixed;
+      }
+
+      .tooltip {
+        position: absolute;
+        z-index: 9;
+        background: rgba(255, 255, 255, 0.8);
+        pointer-events: none;
+      }
+    </style>
+  </head>
+<body>
+  <script>
+    var canvas = document.createElement('canvas');
+    document.body.appendChild(canvas);
+    
+    var ctx = canvas.getContext('2d');
+    
+    var image = new Image();
+    image.src = '/dsm.png';
+    
+    var buffer, imageData, floatData;
+    image.onload = function() {
+      canvas.height = image.height;
+      canvas.width = image.width;
+      ctx.drawImage(image, 0, 0);
+      imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      buffer = imageData.data.buffer;
+      floatData = new Float32Array(buffer);
+    
+      var histogramCanvas = document.createElement('canvas');
+      histogramCanvas.width = 300;
+      histogramCanvas.height = 100;
+      histogramCanvas.classList.add("histogram");
+      document.body.appendChild(histogramCanvas);
+      
+      var hist = {};
+      var skipped = 0;
+      var sorted = floatData.slice().sort(function(a, b) {
+        return a - b;
+      });
+
+      for(var i = 0; i<sorted.length; i++) {
+        if(sorted[i] < -322) {
+          skipped++;
+        }
+      }
+
+ var samples = new Array(histogramCanvas.width),
+          interval = Math.floor((sorted.length - skipped) / samples.length);
+      var sampleIndex = 0;
+
+
+
+      for(var i = 0; i<sorted.length; i++) {
+        if(sorted[i] < -322) {
+          continue;
+        }
+
+        
+        
+        if(i === sorted.length - 1) {
+          samples[sampleIndex] /= Math.floor((sorted.length - skipped) / samples.length);
+        } else {
+          if(interval === 0) {
+            samples[sampleIndex] += sorted[i];
+            samples[sampleIndex] /= Math.floor((sorted.length - skipped) / samples.length);
+            interval = Math.floor((sorted.length - skipped) / samples.length);
+            sampleIndex++;
+          } else {
+            if(samples[sampleIndex] === undefined) samples[sampleIndex] = 0;
+            samples[sampleIndex] += sorted[i];
+            interval--; 
+          }
+        }
+        
+        var index =
+          (sorted[i] << 16) |
+          (sorted[i] << 8) |
+          sorted[i];
+
+          hist[index] = hist[index] !== undefined ? ++hist[index] : 0;
+      }
+
+      var totalSamples = sorted.length - skipped,
+          buckets = Object.keys(hist).length;
+      
+      var histCtx = histogramCanvas.getContext('2d');
+      var accum = [];
+      var colors = [];
+
+      // 1. sort all heights
+      // 2. draw line going from one height to the next, from lowest to highest height
+      // 3. y is scaled height value
+      // 4. x is offset. 0 = smallest, canvas width = largest
+      // 5. only need enough points to sample for how wide canvas is
+      Object.keys(hist).sort(function(a, b) { return a-b; }).forEach(function(value, index) {
+        var color = hist[value].toString(16);
+        
+        while(color.length < 6) color = "0" + color;
+        colors.push(color);
+        accum.push((hist[value] * histogramCanvas.height) / totalSamples);
+      });
+
+      var maxValue = Math.max.apply(Math, accum),
+          factor   = histogramCanvas.height / maxValue;
+      for (var index = 0; index < accum.length; index++) {
+        histCtx.fillStyle = '#' + colors[index];
+        var n = accum[index] * factor;
+        histCtx.fillRect(index * (histogramCanvas.width / buckets), histogramCanvas.height - n, (histogramCanvas.width / buckets), n);
+      }
+
+      histCtx.beginPath();
+      var minSample = Math.min.apply(Math, samples);
+      var maxSample = Math.max.apply(Math, samples);
+      var sampleFactor = histogramCanvas.height / Math.abs(maxSample - minSample);
+      for(var i = 0; i < histogramCanvas.width; i++) {
+        var sample = Math.abs(Math.floor((samples[i] - minSample) * sampleFactor));
+        //console.log('sample', samples[i], 'factored', sample, 'sampleFactor', sampleFactor);
+        if(i === 0) {
+          histCtx.moveTo(i, histogramCanvas.height - sample); 
+        } else {
+          histCtx.lineTo(i, histogramCanvas.height - sample);
+          histCtx.stroke();
+        }
+      }
+      histCtx.closePath();
+      //histCtx.stroke();
+
+      console.log(hist);
+      //histogram('dsm.png', function(err, histogram) {
+      //  console.log('histogram callback!!', err, histogram);
+      //});
+
+   var scrubber = document.createElement('canvas');
+        scrubber.height = histogramCanvas.height;
+        scrubber.width  = histogramCanvas.width;
+    
+    scrubber.classList.add("scrubber"); 
+    document.body.appendChild(scrubber); 
+    var scrubCtx = scrubber.getContext('2d');
+
+  
+  var interval = Math.floor((sorted.length - skipped) / samples.length);
+    console.log('samples', samples);
+    window.updateOffset = function(value, offset) {
+      var index = 0;
+      for(var i = 0; i < samples.length; i++) {
+        if(value > samples[i]) {
+          continue;
+        } else if(value < samples[i]) {
+          index = i - 1;
+        } else {
+          index = i;
+        }
+        
+        if(index > (samples.length - 1)) index = samples.length - 1;
+        if(index < 0) index = 0;
+        break;
+      }
+        
+        scrubCtx.clearRect(0, 0, scrubber.width, scrubber.height);
+        var bucketIndex = Math.floor(offset / interval);
+        scrubCtx.beginPath();
+        scrubCtx.moveTo(index, 0);
+        scrubCtx.lineTo(index, scrubber.height);
+        scrubCtx.stroke();
+        scrubCtx.closePath();
+      }
+    };
+
+    canvas.addEventListener('mousemove', function(e) {
+      var xy = [e.offsetX, e.offsetY];
+      
+      var picker = {
+        r: imageData.data[((xy[1]*(imageData.width*4)) + (xy[0]*4))],
+        g: imageData.data[((xy[1]*(imageData.width*4)) + (xy[0]*4)) + 1],
+        b: imageData.data[((xy[1]*(imageData.width*4)) + (xy[0]*4)) + 2],
+        a: imageData.data[((xy[1]*(imageData.width*4)) + (xy[0]*4)) + 3]
+      };
+
+      var offset = (xy[1] * canvas.width) + xy[0];
+
+      var value = floatData[offset];
+
+      updateOffset(value, offset);
+      
+      var tooltip = document.createElement('div');
+      tooltip.innerHTML = '[' + xy[0] + ',' + xy[1] + ']' + '<br/>' + ['R:', picker.r, 'G:', picker.g, 'B:',  picker.b, 'A:', picker.a].join(' ') + '<br/>' + 'V:' + value + '<br/>O:' + offset; 
+      tooltip.style.left = xy[0];
+      tooltip.style.top  = xy[1];
+      tooltip.className = 'tooltip';
+      
+      var tooltips = document.querySelectorAll('.tooltip');
+      Array.prototype.forEach.call(tooltips, function(node) {
+        node.parentNode.removeChild(node);
+      });
+      document.body.appendChild(tooltip);
+    });
+  </script>
+  </body>
+</html>
